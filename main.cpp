@@ -11,12 +11,13 @@ using namespace std::chrono;
 #define FPS 10
 #define SLEEP_TIME 1000000/FPS
 high_resolution_clock::time_point start;
-high_resolution_clock::time_point start_move;
+high_resolution_clock::time_point begining;
 #define NOW high_resolution_clock::now()
 #define TIME duration_cast<duration<double>>(NOW - start).count()
-#define TIME_MOVE duration_cast<duration<double>>(NOW - start_move).count()
+#define TIME_GLOBAL duration_cast<duration<double>>(NOW - begining).count()
 
 cv::VideoCapture cap;
+cv::VideoWriter writer;
 cv::Mat frame = cv::Mat::zeros(1080, 1920, CV_8UC3);
 std::vector<cv::Mat> frames;
 cv::Mat grayMedianFrame;
@@ -40,9 +41,9 @@ void contour(cv::Mat tmp_mat){
             drawContours(merged_contours_mat, std::vector<std::vector<cv::Point>>{contour}, -1, cv::Scalar(255), 2);
         }
     }
-
-
-
+    cv::Mat colorImage;
+    cv::cvtColor(merged_contours_mat, colorImage, cv::COLOR_GRAY2RGB);
+    writer.write(colorImage);
     cv::imshow("video", merged_contours_mat);
     cv::waitKey(1);
 }
@@ -105,21 +106,26 @@ void framediff(){
  
   // Display Image
   contour(dframe);
+
 }
 
 void run(){
 
     cap >> frame;
+
     framediff();
 
 }
 
 int main(int argc, char** argv)
 {
+
   start = NOW;
   std::cout << "-------" << std::endl;
   std::string videopath(argv[1]);
+  float endtime = std::atoi(argv[2]);
   cap = cv::VideoCapture(videopath+"/video.mp4");
+  writer = cv::VideoWriter(videopath+"/video_br.mkv", cv::VideoWriter::fourcc('H','2','6','4'), 10, cv::Size(1920, 1080));
 
   if(!cap.isOpened()){
     std::cout << "Cannot read video at " << videopath << std::endl;
@@ -130,6 +136,7 @@ int main(int argc, char** argv)
   printf("IS OPENED %d %d\n",cap.isOpened(),fps);
  
   background(videopath);
+  begining = NOW;
   while(1){
     start = NOW;
     
@@ -138,8 +145,16 @@ int main(int argc, char** argv)
     int us = std::max(0.,SLEEP_TIME - TIME*1e6);
     usleep(us);
 
+    if(TIME_GLOBAL > endtime){
+      break;
+    }
+
   }
 
+  cap.release();
+  writer.release();
+  cv::destroyAllWindows();
+
   std::cout << "-------" << std::endl;
-  std::cout << TIME << std::endl;
+  std::cout << TIME_GLOBAL << std::endl;
 }
