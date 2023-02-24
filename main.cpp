@@ -24,7 +24,7 @@ cv::Mat grayMedianFrame;
 
 void contour(cv::Mat tmp_mat){
     cv::Mat  grey_mat;
-    cv::GaussianBlur(tmp_mat,grey_mat,cv::Size(7,7),0,0);
+    cv::GaussianBlur(tmp_mat,grey_mat,cv::Size(15,15),0,0);
 
     std::vector<std::vector<cv::Point> > contours;
     std::vector<cv::Vec4i > hierarchy;
@@ -32,19 +32,30 @@ void contour(cv::Mat tmp_mat){
     cv::Canny(grey_mat, edged, 20,140);
     cv::findContours(edged, contours, hierarchy,cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    // Draw the merged contours on the image
-    cv::Mat merged_contours_mat = cv::Mat::zeros(grey_mat.size(), CV_8UC1);
-    for (auto contour : contours)
-    {
-        if (!contour.empty())
-        {
-            drawContours(merged_contours_mat, std::vector<std::vector<cv::Point>>{contour}, -1, cv::Scalar(255), 2);
-        }
-    }
-    cv::Mat colorImage;
-    cv::cvtColor(merged_contours_mat, colorImage, cv::COLOR_GRAY2RGB);
-    writer.write(colorImage);
-    cv::imshow("video", merged_contours_mat);
+    // // Draw the merged contours on the image
+    // cv::Mat merged_contours_mat = cv::Mat::zeros(grey_mat.size(), CV_8UC1);
+    // for (auto contour : contours)
+    // {
+    //     if (!contour.empty())
+    //     {
+    //         drawContours(merged_contours_mat, std::vector<std::vector<cv::Point>>{contour}, -1, cv::Scalar(255), 2);
+    //     }
+    // }
+
+  // Create mask image
+  cv::Mat maskImg = cv::Mat::zeros(grey_mat.size(), CV_8UC1);
+
+  // Draw contours on mask image
+  cv::drawContours(maskImg, contours, -1, cv::Scalar(255), cv::FILLED);
+
+  // Apply mask to input image
+  cv::Mat outputImg;
+  cv::bitwise_and(frame, frame, outputImg, maskImg);
+
+    // cv::Mat colorImage;
+    // cv::cvtColor(merged_contours_mat, colorImage, cv::COLOR_GRAY2RGB);
+    writer.write(outputImg);
+    cv::imshow("video", outputImg);
     cv::waitKey(1);
 }
 
