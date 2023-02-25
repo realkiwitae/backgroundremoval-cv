@@ -19,10 +19,18 @@ high_resolution_clock::time_point begining;
 cv::VideoCapture cap;
 cv::VideoWriter writer;
 cv::Mat frame = cv::Mat::zeros(1080, 1920, CV_8UC3);
+cv::Mat blackframe = cv::Mat::zeros(1080, 1920, CV_8UC3);
+cv::Size worksize = cv::Size(400,400);
 std::vector<cv::Mat> frames;
-cv::Mat grayMedianFrame;
+cv::Mat grayMedianFrame,grayMedianFrameDownscale;
 
-void contour(cv::Mat tmp_mat){
+bool doConvexHullsOverlap(const std::vector<cv::Point>& hull1, const std::vector<cv::Point>& hull2, double threshold) {
+    std::vector<cv::Point> intersection;
+    cv::intersectConvexConvex(hull1, hull2, intersection);
+    return intersection.size()>1 && cv::contourArea(intersection)<=std::min(cv::contourArea(hull1),cv::contourArea(hull2));
+}
+
+std::vector<std::vector<cv::Point>> contour(cv::Mat tmp_mat){
     cv::Mat  grey_mat;
     cv::GaussianBlur(tmp_mat,grey_mat,cv::Size(15,15),0,0);
 
@@ -32,39 +40,39 @@ void contour(cv::Mat tmp_mat){
     cv::Canny(grey_mat, edged, 20,140);
     cv::findContours(edged, contours, hierarchy,cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    // // Draw the merged contours on the image
-    // cv::Mat merged_contours_mat = cv::Mat::zeros(grey_mat.size(), CV_8UC1);
-    // for (auto contour : contours)
-    // {
-    //     if (!contour.empty())
-    //     {
-    //         drawContours(merged_contours_mat, std::vector<std::vector<cv::Point>>{contour}, -1, cv::Scalar(255), 2);
-    //     }
-    // }
 
-  // Create mask image
-  cv::Mat maskImg = cv::Mat::zeros(grey_mat.size(), CV_8UC1);
+  std::vector<std::vector<cv::Point> > cvcontours;
+  for(auto contour : contours){
 
-  // Draw contours on mask image
-  cv::drawContours(maskImg, contours, -1, cv::Scalar(255), cv::FILLED);
+    std::vector<cv::Point> hull;
+    cv::convexHull(contour, hull); 
+    for(auto& p : hull){
+      p.x *= (1920./tmp_mat.size().width);
+      p.y *= (1080./tmp_mat.size().height); 
+    }
+    cvcontours.push_back(hull);
+  }
 
+
+  return cvcontours;
+  // // Create mask image
+  // cv::Mat maskImg = cv::Mat::zeros(grey_mat.size(), CV_8UC1);
+
+  // // Draw contours on mask image
+  // cv::drawContours(maskImg, cvcontours, -1, cv::Scalar(255), cv::FILLED);
+  // cv::resize(maskImg,maskImg,frame.size());
   // Apply mask to input image
-  cv::Mat outputImg;
-  cv::bitwise_and(frame, frame, outputImg, maskImg);
+ // return maskImg;
 
-    // cv::Mat colorImage;
-    // cv::cvtColor(merged_contours_mat, colorImage, cv::COLOR_GRAY2RGB);
-    writer.write(outputImg);
-    cv::imshow("video", outputImg);
-    cv::waitKey(1);
 }
 
 void background(std::string path){
 
   std::string backgroundpath = path + "/background.jpg";
   if (access(backgroundpath.c_str(), F_OK) == 0) {
-    frame = cv::imread(backgroundpath);
-    cv::cvtColor(frame, grayMedianFrame, cv::COLOR_BGR2GRAY);
+    grayMedianFrame = cv::imread(backgroundpath);
+    cv::cvtColor(grayMedianFrame, grayMedianFrame, cv::COLOR_BGR2GRAY);
+    cv::resize(grayMedianFrame,grayMedianFrameDownscale,worksize);
     return;
   }
 
@@ -73,7 +81,7 @@ void background(std::string path){
   cap.get(cv::CAP_PROP_FRAME_COUNT));
  
   vector<cv::Mat> frames;
- 
+  
   while(frames.size() < 20)
   {
     int fid = distribution(generator);
@@ -87,6 +95,7 @@ void background(std::string path){
       continue;
     // cv::imshow("frame", frame);
     // cv::waitKey(0);
+    cv::resize(f, f, worksize);
     frames.push_back(f);
   }
 
@@ -103,29 +112,71 @@ void background(std::string path){
   cv::imwrite(backgroundpath, grayMedianFrame);
 }
 
-void framediff(){
+std::vector<std::vector<cv::Point>> framediff(cv::Mat background){
   // Calculate absolute difference of current frame and the median frame
   cv::Mat dframe;
   // Convert current frame to grayscale
-  cvtColor(frame, dframe, cv::COLOR_BGR2GRAY);
+  cv::resize(frame, dframe, background.size());
+  cvtColor(dframe, dframe, cv::COLOR_BGR2GRAY);
  
-
-  absdiff(dframe, grayMedianFrame, dframe);
+  absdiff(dframe, background, dframe);
   
   // Threshold to binarize
   threshold(dframe, dframe, 30, 255, cv::THRESH_BINARY);
- 
-  // Display Image
-  contour(dframe);
 
+  return contour(dframe);
+
+}
+
+cv::Mat contour2mask(std::vector<std::vector<cv::Point>>&contours){
+  
+  // Create mask image
+  cv::Mat mask = cv::Mat::zeros(frame.size(), CV_8UC1);
+  // Draw contours on mask image
+  cv::drawContours(mask, contours, -1, cv::Scalar(255), cv::FILLED);
+  return mask;
 }
 
 void run(){
 
-    cap >> frame;
+  cap >> frame;
+  cv::Mat mask,maskImgDownscale;
+  auto contoursDownscale = framediff(grayMedianFrameDownscale);
+  auto contours = framediff(grayMedianFrame);
 
-    framediff();
+  mask = contour2mask(contours); 
+  maskImgDownscale = contour2mask(contoursDownscale); 
+  cv::imshow("mask", mask);
+  cv::imshow("maskds", maskImgDownscale);
 
+  auto it = contours.begin();
+  while(it != contours.end()){
+    bool b = true;
+    for(auto c : contoursDownscale){
+      if(doConvexHullsOverlap(c,*it,0)){
+        contours.erase(it);
+        b = false;
+        break;
+      }
+    }
+    if(b)it++;
+  }
+
+  mask = contour2mask(contours);  
+
+  cv::Mat outputImg;
+  //cv::bitwise_not(maskImgDownscale,maskImgDownscale);
+  // cv::bitwise_not(mask,mask);
+  // cv::Mat colorImage;
+  // cv::cvtColor(merged_contours_mat, colorImage, cv::COLOR_GRAY2RGB);
+  cv::bitwise_and(frame, frame, outputImg, mask);
+  //cv::bitwise_and(outputImg, blackframe, outputImg, maskImgDownscale);
+  //   cv::imshow("video", outputImg);
+  // cv::waitKey(1);
+
+  writer.write(outputImg);
+  cv::imshow("bis", outputImg);
+  cv::waitKey(1);
 }
 
 int main(int argc, char** argv)
